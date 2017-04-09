@@ -46,10 +46,6 @@ class Node(object):
         while True:
 
             cmd = raw_input("")
-            # if cmd== "send self":
-            #     self.client(self.NODE_ID_LIST[self.my_node_id], self.port, "search:" + "x" )
-            #     time.sleep(10)
-            #     print self.return_value
 
             if len(cmd.split())<1:
                 sys.stderr.write("invalid command\n")
@@ -182,6 +178,7 @@ class Node(object):
                 self.recover(self.sec_fail)
                 sys.stderr.write("sec_fail recovered\n")
                 break  # after T+MaxOneWayDelay
+            
         sys.stderr.write( "first_fail" + str(first_fail)+'\n')
         self.recover(first_fail)
         self.recovering = False
@@ -197,7 +194,6 @@ class Node(object):
 
     def recover(self,node_fail_id):
         local_mem=copy.deepcopy(self.local_memory)
-
         sorted_node_id = sorted(self.NODE_ID_LIST.keys())
         suc_id = sorted_node_id[0]
         suc_idx = 0
@@ -214,8 +210,7 @@ class Node(object):
             suc_idx = -1
 
 
-        if self.my_node_id==suc_id:
-
+        if self.my_node_id==suc_id: 
             for key in local_mem:
                 key_id=ord(key[0]) % (2 ** M)
                 if suc_id>node_fail_id:
@@ -508,17 +503,17 @@ class Node(object):
                 if not hbaddr:  # recv ending msg from client
                     break
 
-                if(hbaddr not in self.NODE_ID_LIST.values()):
-                    # rebalance
+                if(hbaddr not in self.NODE_ID_LIST.values()): #Find first Heart Beating
                     if not self.rebalancing:
+                        #Add to alive node list
                         new_id = int(socket.gethostbyname(hbaddr).split(".")[-1]) % (2 ** M)
                         self.NODE_ID_LIST[new_id] = hbaddr
-
+                        #start timer and wait for next hb for Failure Detection
                         if hbaddr not in self.timer_thread:
                             self.timestamp[hbaddr] = time.time() * 1000
                             self.timer_thread[hbaddr] = threading.Thread(target=self.Timer, args=(hbaddr,), kwargs={})
                             self.timer_thread[hbaddr].start()
-
+                        #start rebalance
                         if len(self.local_memory)!=0:
                             t_reb = threading.Thread(target=self.rebalance, args=(new_id,))
                             t_reb.start()
