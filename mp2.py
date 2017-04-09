@@ -2,7 +2,7 @@
 ECE428: Distributed System
 Machine Problem 2
 Author: Rui Xia, Youjie Li
-Date: Feb. 25. 2017
+Date: April.8. 2017
 '''
 
 import socket
