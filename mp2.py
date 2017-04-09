@@ -1,6 +1,6 @@
 '''
 ECE428: Distributed System
-Machine Problem 1 -- Checkpoint 2
+Machine Problem 2
 Author: Rui Xia, Youjie Li
 Date: Feb. 25. 2017
 '''
@@ -9,57 +9,87 @@ import socket
 import threading
 import time
 import thread
+import sys
+import copy
 
-#----------------------Process Node Containing ISIS Total Ordering and Heartbeat Failure Detectoin---------------
 class Node(object):
     def __init__(self, host, port, port_failure, period, num_node_alive):
-        ###### network parameters ####################################
+        ########## network parameters ####################################
         self.host = host
         self.port = port
         self.port_failure = port_failure
-        ######## ISIS Total Ordering parameters ###############################
-        self.pro_p = 0  # proposed priority
-        self.num_node_alive = num_node_alive
-        self.AGR_P = {}  # Agreed priority
-        self.REC_PRO_COUNTER = {}  # Counter for received proposed priority
-        self.Queue = []  # ISIS Priority Queue
         ######## Heartbeat Failure Detection paramters ########################
         self.period = period
-        self.Flag_Failed = {"VM01": False,
-                            "VM02": False,
-                            "VM03": False,
-                            "VM04": False,
-                            "VM05": False,
-                            "VM06": False,
-                            "VM07": False,
-                            "VM08": False,
-                            "VM09": False,
-                            "VM10": False,
-                            }
         self.timestamp = {}
         self.timer_thread = {}
+        ######## Hashing paramters ########################
+        self.local_memory={}
+        self.owner=[]
+        self.NODE_ID_LIST = {}  #node_id: ip addr
+        self.return_value = {}
+        self.sec_fail=-1
+        self.recovering = False
+        self.rebalancing = False
+        self.sec_flag = False
+        # initialize node id list with local id
+        self.my_vm_id= socket.gethostname().split(".")[0].split("-")[-1]
+        self.my_node_id = int(self.host.split(".")[-1]) % (2 ** M)
+        self.NODE_ID_LIST[self.my_node_id] = socket.gethostname()
+        sys.stderr.write("My Node ID is "+str(self.my_node_id)+'\n')
+
+    def basic_multicast(self, cmd):  # method for multicast msg
+        for i in range(10):
+            host_remote='sp17-cs425-g07-'+str(i+1).zfill(2)+'.cs.illinois.edu'
+            self.client(host_remote, self.port, cmd)  # pack the msg as a client socket to send
 
     def wait_input(self):  # method for take input msg
         while True:
+
             cmd = raw_input("")
-            if cmd == 'q': # self quit process
-                # self.basic_multicast("Left" + ":" + socket.gethostname())
-                print "I am leaving"
-                thread.interrupt_main()
+            # if cmd== "send self":
+            #     self.client(self.NODE_ID_LIST[self.my_node_id], self.port, "search:" + "x" )
+            #     time.sleep(10)
+            #     print self.return_value
 
-            # initialization for ISIS total ordering
-            self.REC_PRO_COUNTER[cmd] = 0
-            self.AGR_P[cmd] = 0
-            self.basic_multicast(cmd)
+            if len(cmd.split())<1:
+                sys.stderr.write("invalid command\n")
+            else:
+                if cmd.split()[0] == "BATCH":# batch command
+                    if len(cmd.split())!=3:
+                        sys.stderr.write("invalid command\n")
+                    else:
+                        file2 = open(cmd.split()[2], 'w')
+                        stdout = sys.stdout
+                        sys.stdout = file2
 
-    def basic_multicast(self, cmd): # method for multicast msg
-        for key, value in CONNECTION_LIST.iteritems():
-            self.client(key, self.port, cmd)  # pack the msg as a client socket to send
+                        try:
+                            file1=open(cmd.split()[1], "r")
+                        except:
+                            sys.stderr.write("file not found\n")
+
+                        for line in file1:
+                            self.get_command(line)
+
+                        file1.close()
+                        sys.stdout = stdout
+                        file2.close()
+
+                        try:
+                            sys.stderr.write(" print file2\n")
+                            with open(cmd.split()[2], "r") as f:
+                                for line in f:
+                                    sys.stderr.write(line + '\n')
+                        except:
+                            sys.stderr.write("create file2 failed")
+                else:
+                    self.get_command(cmd)
+
+
+                #self.client(self.host, self.port,cmd)
 
     def client(self, host, port, cmd):  # method for client socket
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        name = CONNECTION_LIST[socket.gethostname()]  # find current machine name
-
+        # name = CONNECTION_LIST[socket.gethostname()]  # find current machine name
         try:
             s.connect((host, port))  # connect to server
         except:
@@ -68,7 +98,7 @@ class Node(object):
             return -1
 
         try:
-            s.sendall(name + ":" + cmd)  # send message to sever
+            s.sendall(cmd)  # send message to sever
         except:
             s.close()
             return -1
@@ -91,98 +121,354 @@ class Node(object):
                 if not recv_data:  # recv ending msg from client
                     break
 
-                self.ISIS_Total_Ordering(recv_data, addr)
+                # self.Hashing(recv_data, addr)
+                if (recv_data.split(":")[0] == "store"):
+                    self.local_memory[recv_data.split(":")[1]]=recv_data.split(":")[2]
+
+                elif(recv_data.split(":")[0] == "search"):
+                    key_search = recv_data.split(":")[1]
+                    if key_search in self.local_memory.keys():
+                        tt=str(round(time.time() * 1000) % (2**15))
+                        return_thr = threading.Thread(target=self.client,
+                                                      args=(addr[0],self.port,
+                                                        "return:"+str(self.my_vm_id)+"*"
+                                                        +self.local_memory[key_search]
+                                                        +":"+tt),
+                                                      #return:nodeid*returnvalue:timestamp
+                                                      kwargs={})
+                        return_thr.start()
+
+                elif(recv_data.split(":")[0] == "return"):
+                    self.return_value[recv_data.split(":")[-1]]=recv_data.split(":")[1]
+
+
+                elif (recv_data.split(":")[-1] == "failed"):  # received failed message
+
+                    #recover
+                    key_failed=""
+                    for key, value in self.NODE_ID_LIST.iteritems():
+                        if value==recv_data.split(":")[0]:
+                            key_failed= key
+                    if key_failed==self.my_node_id:
+                        continue
+
+                    try:
+                        del self.NODE_ID_LIST [key_failed]
+
+                        if not self.recovering:
+                            t_wsf = threading.Thread(target=self.Timer_wsf, args=(key_failed,))
+                            t_wsf.start()
+                        else:
+                            self.sec_fail = key_failed
+                    except:
+                        pass
+
+                    sys.stderr.write(recv_data+'\n')
 
             conn.close()  # close client socket
 
-    # -------------------------------------ISIS Total Ordering-------------------------------------------
-    def ISIS_Total_Ordering(self, data, addr):
+    def Timer_wsf(self,first_fail): #wait second failure
+        sys.stderr.write("start recovery\n")
+        self.rebalancing = True #start rebalance after recover completed
+        self.recovering=True
+        start_len=len(self.NODE_ID_LIST)
+        for i in range(10):
+            time.sleep(self.period/1000) #T(s)
+            sys.stderr.write("start_len="+str(start_len)+'\n')
+            sys.stderr.write("curr_len="+str(len(self.NODE_ID_LIST))+'\n')
 
-        if data.split(":")[1] == "0":  # received proposed priority
-            #if __debug__:
-            #    print "Received Proposed Priority"
+            if len(self.NODE_ID_LIST)<start_len:
+                sys.stderr.write( "sec_fail"+str(self.sec_fail)+'\n')
+                self.recover(self.sec_fail)
+                sys.stderr.write("sec_fail recovered\n")
+                break  # after T+MaxOneWayDelay
+        sys.stderr.write( "first_fail" + str(first_fail)+'\n')
+        self.recover(first_fail)
+        self.recovering = False
+        self.rebalancing =False
+        sys.stderr.write( "recovery completed"+'\n')
 
-            mse = data.split(":")[-1]
-            self.REC_PRO_COUNTER[mse] = self.REC_PRO_COUNTER[mse] + 1
+        return -1
 
-            if float(data.split(":")[2]) > self.AGR_P[mse]: # record the maximum of proposed priority
-                self.AGR_P[mse] = float(data.split(":")[2])
 
-            if self.REC_PRO_COUNTER[mse] == self.num_node_alive: # all proposed priorities received from alive nodes
-                #if __debug__:
-                #    print "REC_PRO_COUNTER Done"
-                # multicast agreed priority with the message by a child thread
-                broadcast_AGR_P = threading.Thread(target=self.basic_multicast,
-                                                   args=("1" + ":" + str(self.AGR_P[mse]) + ":" + data.split(":")[-2] + ":" + mse,))
-                                                   # self.name : 1 : self.AGR_P : receive_name : message
-                broadcast_AGR_P.start()
 
-        elif data.split(":")[1] == "1":  # received agreed priority
-            #if __debug__:
-            #   print "Received Agreed Priority"
-            # search index of agreed message in the priority self.Queue
-            idx = [elem[2] for elem in self.Queue].index(data.split(":")[-2] + ":" + data.split(":")[-1])
 
-            # mark it deliverable and update agreed priority
-            self.Queue[idx][1] = True
-            self.Queue[idx][0] = float(data.split(":")[2])
-            self.pro_p = float(data.split(":")[2])
+# --------------------------------------key-value storage---------------------------------------------
 
-            # reorder priority self.Queue
-            self.Queue.sort(key=lambda elem: elem[0])
+    def recover(self,node_fail_id):
+        local_mem=copy.deepcopy(self.local_memory)
 
-            # deliver any deliverable at front of the self.Queue
-            while (self.Queue and self.Queue[0][1] == True):
-                print (self.Queue.pop(0)[2])
+        sorted_node_id = sorted(self.NODE_ID_LIST.keys())
+        suc_id = sorted_node_id[0]
+        suc_idx = 0
+        for idx, node_id in enumerate(sorted_node_id):
 
-        elif data.split(":")[-1] == "failed" and self.Flag_Failed[data.split(":")[-2]] == False:  # received someone failed
-            #if __debug__:
-            #   print "Received failed"
-            failed_machine_num = data.split(":")[-2]
-            self.num_node_alive = self.num_node_alive - 1
-            self.Flag_Failed[failed_machine_num] = True
-            # search pending message from failed node
-            failed_idx = [i for i, elem in enumerate(self.Queue) if elem[-1].split(":")[0] == failed_machine_num]
+            if node_id >= node_fail_id:
+                suc_id = node_id
+                suc_idx = idx
+                break
+        pre_idx=suc_idx-1
+        pre_id=sorted_node_id[pre_idx]
 
-            if not failed_idx: # if no pending message from failed node
-                print failed_machine_num + "failed"
+        if suc_idx == len(sorted_node_id)-1:
+            suc_idx = -1
 
-            else: # has pending message
 
-                for i in failed_idx: # kick out any non-agreed messages
-                    if self.Queue[failed_idx[i]][1] == False:
-                        self.Queue.pop(i)
-                        failed_idx.remove(i)
+        if self.my_node_id==suc_id:
 
-                if failed_idx: # has agreed pending message
-                    self.Queue.append([self.Queue[failed_idx[-1]][0] + 0.1, True, failed_machine_num + "failed"])
-                    self.Queue.sort(key=lambda elem: elem[0]) # insert failed notification after the agreed one
+            for key in local_mem:
+                key_id=ord(key[0]) % (2 ** M)
+                if suc_id>node_fail_id:
+                    if key_id<=suc_id and key_id>node_fail_id:
+                        self.client(self.NODE_ID_LIST[pre_id], self.port, "store:" + key + ":" + local_mem[key])
+                        sys.stderr.write( str(self.my_node_id)+" have stored "+key+ " in precessor " +str(pre_id)+'\n')
                 else:
-                    print failed_machine_num + "failed"
+                    if (key_id>node_fail_id and key_id<2**M) or (key_id>=0 and  key_id<=suc_id):
+                        self.client(self.NODE_ID_LIST[pre_id], self.port, "store:" + key + ":" + local_mem[key])
+                        sys.stderr.write( str(self.my_node_id)+" have stored "+key+ " in precessor " +str(pre_id)+'\n')
+              
+        elif self.my_node_id==pre_id:
+            for key in local_mem:
+                key_id=ord(key[0]) % (2 ** M)
+                if node_fail_id>pre_id:
+                    if key_id>pre_id and key_id<=node_fail_id:
+                        self.client(self.NODE_ID_LIST[sorted_node_id[suc_idx+1]], self.port, "store:" + key + ":" + local_mem[key])
+                        sys.stderr.write( str(self.my_node_id)+" have stored "+key+" in suc.suc "+str(sorted_node_id[suc_idx+1])+'\n')
 
-        elif (data.split(":")[-1] != "failed"):  # received normal message
-            #if __debug__:
-            #    print "Received Normal Message"
-            # increment proposed number
-            self.pro_p = self.pro_p + 1
-            # search pid
-            name = CONNECTION_LIST[socket.gethostname()]
-            # create proposed priority.pid
-            p = float(name[-1]) / 10 + self.pro_p
-            self.Queue.append([p, False, data])
-            # send proposed priority back to sender by a child thread
-            send_pro_p = threading.Thread(target=self.client,
-                                          args=(addr[0], self.port, "0" + ":" + str(p) + ":" + data,))
-                                          # self.name : 0 : prop_p : receive_name : message
-            send_pro_p.start()
+                else:
+                    if (key_id>pre_id and key_id<2**M) or( key_id>=0 and key_id<=node_fail_id):
+                        self.client(self.NODE_ID_LIST[sorted_node_id[suc_idx+1]], self.port, "store:" + key + ":" + local_mem[key])
+                        sys.stderr.write( str(self.my_node_id)+" have stored "+key+" in suc.suc "+str(sorted_node_id[suc_idx+1])+'\n')
 
-    #--------------------------------------Failure Detection-------------------------------------------
+                if node_fail_id>sorted_node_id[pre_idx-1]:
+                    if key_id<=node_fail_id and key_id>sorted_node_id[pre_idx-1]:
+                        self.client(self.NODE_ID_LIST[suc_id], self.port,"store:" + key + ":" + local_mem[key])
+                        sys.stderr.write( str(self.my_node_id)+" have stored "+key +"in suc " +str(suc_id)+'\n')
+                else:
+                    if (key_id<=node_fail_id and key_id>0) or  (key_id>sorted_node_id[pre_idx-1] and key_id<2**M):
+                        self.client(self.NODE_ID_LIST[suc_id], self.port,"store:" + key + ":" + local_mem[key])
+                        sys.stderr.write( str(self.my_node_id)+" have stored "+key +"in suc " +str(suc_id)+'\n')
+
+    def rebalance(self,node_new_id):
+        local_mem = copy.deepcopy(self.local_memory)
+        sys.stderr.write("rebalance started \n")
+        self.rebalancing=True
+        sorted_node_id = sorted(self.NODE_ID_LIST.keys())
+        suc_idx = 0
+        for idx, node_id in enumerate(sorted_node_id):
+            if node_id > node_new_id:
+                suc_idx = idx
+                break
+        pre_idx = suc_idx - 2
+        pre_pre_idx= pre_idx -1
+
+        suc_id= sorted_node_id[suc_idx]
+        pre_id = sorted_node_id[pre_idx]
+        pre_pre_id=sorted_node_id[pre_pre_idx]
+
+        if suc_idx == len(sorted_node_id)-1:
+            suc_idx=-1
+
+        suc_suc_idx= suc_idx+1
+        suc_suc_id=sorted_node_id[suc_suc_idx]
+
+
+        if self.my_node_id==suc_id:
+            for key in local_mem:
+                key_id = ord(key[0]) % (2 ** M)
+
+                if suc_suc_id>suc_id:
+                    if not (key_id<=suc_suc_id and key_id>suc_id):
+                        self.client(self.NODE_ID_LIST[node_new_id], self.port, "store:" + key + ":" + local_mem[key])
+                        sys.stderr.write( str(self.my_node_id)+" have stored "+key+ " in r " +str(node_new_id)+'\n')
+                else:
+                    if not((key_id>suc_id and key_id<2**M) or (key_id>=0 and  key_id<=suc_suc_id)):
+                        self.client(self.NODE_ID_LIST[node_new_id], self.port, "store:" + key + ":" + local_mem[key])
+                        sys.stderr.write( str(self.my_node_id)+" have stored "+key+ " in  " +str(node_new_id)+'\n')
+
+
+                if pre_id>pre_pre_id:
+                    if(key_id<=pre_id and key_id>pre_pre_id):
+                        del self.local_memory[key]
+                else:
+                    if(key_id > pre_pre_id and key_id < 2 ** M) or (key_id >= 0 and key_id <= pre_id):
+                        del self.local_memory[key]
+
+
+        if self.my_node_id==pre_id:
+            for key in local_mem:
+                key_id = ord(key[0]) % (2 ** M)
+                if suc_id > node_new_id:
+                    if (key_id <= suc_id and key_id > node_new_id):
+                        del self.local_memory[key]
+                else:
+                    if (key_id > node_new_id and key_id < 2 ** M) or (key_id >= 0 and key_id <= suc_id):
+                        del self.local_memory[key]
+
+
+        if self.my_node_id == suc_suc_id:
+            for key in local_mem:
+                key_id = ord(key[0]) % (2 ** M)
+                if node_new_id > pre_id:
+                    if (key_id <= node_new_id and key_id > pre_id):
+                        del self.local_memory[key]
+                else:
+                    if (key_id > pre_id and key_id < 2 ** M) or (key_id >= 0 and key_id <= node_new_id):
+                        del self.local_memory[key]
+
+        self.rebalancing = False
+        sys.stderr.write("rebalance completed\n")
+
+        return 0
+
+    def get_command(self, data):
+        cmd=data.split()
+        len_cmd =len(data.split())
+
+        if len_cmd<1:
+            sys.stderr.write("empty command \n")
+
+        else:
+            if cmd[0] == "SET":  # set command
+                if len_cmd<=1:
+                    sys.stderr.write("invalid SET\n")
+                else:
+                    if len_cmd==2:
+                        value_set=" "
+
+                    else:
+                        value_set=" ".join(cmd[2:])
+
+                    self.com_set(cmd[1],value_set)
+                    print "SET OK"
+
+
+            elif cmd[0] == "GET":  # get command
+                if len_cmd !=2:
+                    sys.stderr.write("invalid GET\n")
+                else:
+                    self.com_get(cmd[1])
+
+            elif cmd[0] == "OWNERS":  # owners command
+                if len_cmd != 2:
+                    sys.stderr.write("invalid OWNERS\n")
+                else:
+                    self.com_owner(cmd[1])
+
+            elif cmd[0] == "LIST_LOCAL":  # get command
+                if len_cmd != 1:
+                    sys.stderr.write("invalid Command\n")
+                else:
+                    self.com_list()
+            else:
+                sys.stderr.write("Invalid Command\n")
+
+    def com_set(self,key_input, value_input):
+        key_id=ord(key_input[0])%(2**M)
+        sorted_node_id=sorted(self.NODE_ID_LIST.keys())
+
+        store_id = sorted_node_id[0]
+        store_idx = 0
+        for idx, node_id in enumerate(sorted_node_id):
+            if node_id >= key_id:
+                store_id = node_id
+                store_idx = idx
+                break
+
+        self.client(self.NODE_ID_LIST[store_id], self.port, "store:" + key_input + ":" + value_input)
+        idx_pre = store_idx - 1
+        self.client(self.NODE_ID_LIST[sorted_node_id[idx_pre]], self.port, "store:" + key_input + ":" + value_input)
+        idx_suc = (store_idx + 1) % len(sorted_node_id)
+        self.client(self.NODE_ID_LIST[sorted_node_id[idx_suc]], self.port, "store:" + key_input + ":" + value_input)
+
+    def com_get(self,key_input):
+        self.return_value={}
+        key_id = ord(key_input[0]) % (2 ** M)
+        sorted_node_id = sorted(self.NODE_ID_LIST.keys())
+
+        store_id=sorted_node_id[0]
+        store_idx=0
+        for idx, node_id in enumerate(sorted_node_id):
+            if node_id >= key_id:
+                store_id= node_id
+                store_idx=idx
+                break
+
+        self.client(self.NODE_ID_LIST[store_id], self.port, "search:" + key_input)
+        idx_pre=store_idx-1
+        self.client(self.NODE_ID_LIST[sorted_node_id[idx_pre]], self.port, "search:" + key_input)
+        idx_suc = (store_idx + 1) % len(sorted_node_id)
+        self.client(self.NODE_ID_LIST[sorted_node_id[idx_suc]], self.port, "search:" + key_input)
+
+        time.sleep(T/5/1000) #timeout=T/5
+        if len(self.return_value)>0:
+            value_return=" ".join(self.return_value[sorted(self.return_value.keys())[-1]].split("*")[1:])
+            print "Found"+": "+value_return #returnvalue
+            # sys.stderr.write("\n".join(self.return_value.keys()))
+            # sys.stderr.write(self.return_value)
+        else:
+            print "Not found"
+
+    def com_list(self):
+        local_mem = copy.deepcopy(self.local_memory)
+        for key, value in local_mem.iteritems():
+            print key + ":" + value
+        print "END LIST"
+
+    def com_owner(self,key_input):
+        self.return_value={}
+        self.owner=[]
+        owner_cal=[]
+
+        key_id = ord(key_input[0]) % (2 ** M)
+        sorted_node_id = sorted(self.NODE_ID_LIST.keys())
+
+        store_id = sorted_node_id[0]
+        store_idx = 0
+        for idx, node_id in enumerate(sorted_node_id):
+            if node_id >= key_id:
+                store_id = node_id
+                store_idx = idx
+                break
+
+        owner_cal.append(self.NODE_ID_LIST[store_id].split(".")[0].split("-")[-1])
+        idx_pre = store_idx - 1
+        owner_cal.append(self.NODE_ID_LIST[sorted_node_id[idx_pre]].split(".")[0].split("-")[-1])
+        idx_suc = (store_idx + 1) % len(sorted_node_id)
+        owner_cal.append(self.NODE_ID_LIST[sorted_node_id[idx_suc]].split(".")[0].split("-")[-1])
+
+        sys.stderr.write("possible owers:\n")
+        sys.stderr.write(" ".join(owner_cal)+'\n')
+
+        self.client(self.NODE_ID_LIST[store_id], self.port, "search:" + key_input)
+        self.client(self.NODE_ID_LIST[sorted_node_id[idx_pre]], self.port, "search:" + key_input)
+        self.client(self.NODE_ID_LIST[sorted_node_id[idx_suc]], self.port, "search:" + key_input)
+
+        for i in range(5):
+            time.sleep(float(self.period)/1000/25)  # timeout=T/5
+            if len(self.return_value) >= 3:
+                sys.stderr.write(str(len(self.return_value))+'\n')
+                break
+
+        if len(self.return_value)<1:
+            print "Owners Not found"
+        else:
+            sys.stderr.write(str(len(self.return_value)) + '\n')
+            for key, value in self.return_value.iteritems():
+                self.owner.append(value.split("*")[0])
+            print " ".join(self.owner)
+
+
+
+
+#--------------------------------------Failure Detection-------------------------------------------
     def multicast_0(self):  # method for multi-cast heartbeat
         #print "Multicast Hb Entered"
         # uni-cast the msg to every node in this group
-        for key, value in CONNECTION_LIST.iteritems():
-            if (socket.gethostname()!= key):
-                self.client_0(key, self.port_failure)  # pack the msg as a client socket to send
+        for i in range(10):
+            host_remote='sp17-cs425-g07-'+str(i+1).zfill(2)+'.cs.illinois.edu'
+            if socket.gethostname()!= host_remote:
+                self.client_0(host_remote, self.port_failure)  # pack the msg as a client socket to send
 
     def client_0(self, host, port):  # method for heartbeat client socket
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -222,46 +508,50 @@ class Node(object):
                 if not hbaddr:  # recv ending msg from client
                     break
 
-                self.timestamp[hbaddr] = time.time()*1000
-                if hbaddr not in self.timer_thread:
-                    self.timer_thread[hbaddr] = threading.Thread(target=self.Timer, args=(hbaddr,), kwargs={})
-                    self.timer_thread[hbaddr].start()
+                if(hbaddr not in self.NODE_ID_LIST.values()):
+                    # rebalance
+                    if not self.rebalancing:
+                        new_id = int(socket.gethostbyname(hbaddr).split(".")[-1]) % (2 ** M)
+                        self.NODE_ID_LIST[new_id] = hbaddr
+
+                        if hbaddr not in self.timer_thread:
+                            self.timestamp[hbaddr] = time.time() * 1000
+                            self.timer_thread[hbaddr] = threading.Thread(target=self.Timer, args=(hbaddr,), kwargs={})
+                            self.timer_thread[hbaddr].start()
+
+                        if len(self.local_memory)!=0:
+                            t_reb = threading.Thread(target=self.rebalance, args=(new_id,))
+                            t_reb.start()
+                        else:
+                            sys.stderr.write("node "+str(new_id)+" connected\n")
+                else:
+                    #if hbaddr in self.timer_thread:
+                    self.timestamp[hbaddr] = time.time() * 1000
 
             conn.close()  # close client socket
 
     def Timer(self, host):
         while True:
-            time.sleep((self.period/1000)/3)
-            if(time.time()*1000 > self.timestamp[host] + 2*self.period): # T+MaxOneWayDelay
-                #broadcast
-                self.basic_multicast(CONNECTION_LIST[host]+":"+"failed")
+            time.sleep((self.period / 1000) / 3)
+            if (time.time() * 1000 > self.timestamp[host] + 2 * self.period):  # T+MaxOneWayDelay
+                # broadcast
+                self.basic_multicast(host + ":" + "failed")
                 return -1
 
-#-----------------------------------Main Method----------------------------------------------
+#-----------------------------------Main Method-----------------------------------------------
 if __name__ == "__main__":
-    print "ChatRoom Started ..."
-    ######### global dictionary for all machine ###############################
+    print "Started ..."
 
-    CONNECTION_LIST = {'sp17-cs425-g07-01.cs.illinois.edu': "VM01",
-                       'sp17-cs425-g07-02.cs.illinois.edu': "VM02",
-                       'sp17-cs425-g07-03.cs.illinois.edu': "VM03",
-                       'sp17-cs425-g07-04.cs.illinois.edu': "VM04",
-                       'sp17-cs425-g07-05.cs.illinois.edu': "VM05",
-                       'sp17-cs425-g07-06.cs.illinois.edu': "VM06",
-                       'sp17-cs425-g07-07.cs.illinois.edu': "VM07",
-                       'sp17-cs425-g07-08.cs.illinois.edu': "VM08",
-                       'sp17-cs425-g07-09.cs.illinois.edu': "VM09",
-                       'sp17-cs425-g07-10.cs.illinois.edu': "VM10",
-
-                       }
-
-    ########################## main code ######################################
-    T = 5000 # ms, period
+    ############################ main code #######################################
+    M = 5  # hashing bits
+    T = 2500 # ms, period
     user_port = 9999 # port for message input
     fail_detect_port = 8888 # port for heart beat
     host = socket.gethostbyname(socket.gethostname())  # get host machine IP address
     # create process node object containing both ISIS and Failure Detection
-    node = Node(host, user_port, fail_detect_port, T, len(CONNECTION_LIST))
+
+    node = Node(host, user_port, fail_detect_port, T, 10)
+
 
     ###### ISIS Total Ordering Thread ###########################################
     t1 = threading.Thread(target=node.wait_input)  # thread for client (send msg)
@@ -270,14 +560,14 @@ if __name__ == "__main__":
     ###### Heartbeat Threads #####################################################
     t3 = threading.Thread(target=node.heartbeating) # thread for sending heartbeating
     t4 = threading.Thread(target=node.detector) # thread for detector of heartbeating(receive heartbeat, detect failure)
-
+    #
     t1.daemon=True
     t2.daemon=True
     t3.daemon=True
     t4.daemon=True
 
-    # t2.start()
-    # t1.start()
+    t2.start()
+    t1.start()
     t4.start()
     t3.start()
 
