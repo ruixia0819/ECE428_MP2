@@ -13,7 +13,7 @@ import sys
 import copy
 
 class Node(object):
-    def __init__(self, host, port, port_failure, period, num_node_alive):
+    def __init__(self, host, port, port_failure, period):
         ########## network parameters ####################################
         self.host = host
         self.port = port
@@ -36,6 +36,11 @@ class Node(object):
         self.my_node_id = int(self.host.split(".")[-1]) % (2 ** M)
         self.NODE_ID_LIST[self.my_node_id] = socket.gethostname()
         sys.stderr.write("My Node ID is "+str(self.my_node_id)+'\n')
+        #################### Evaluation ####################
+        self.recv_fail_time = 0
+        self.hb_cnt = 0
+        self.bw_sum = 0
+        self.tw_start = 0.0
 
     def basic_multicast(self, cmd):  # method for multicast msg
         for i in range(10):
@@ -46,11 +51,12 @@ class Node(object):
         while True:
 
             cmd = raw_input("")
-            # if cmd== "send self":
-            #     self.client(self.NODE_ID_LIST[self.my_node_id], self.port, "search:" + "x" )
-            #     time.sleep(10)
-            #     print self.return_value
-
+            ############# Failure Detection Time ############
+            if cmd == 'q':  # self quit process
+                sys.stderr.write("I am leaving\n")
+                self.basic_multicast("-1" + ":" + str(time.time()))
+                thread.interrupt_main()
+            ##################################################
             if len(cmd.split())<1:
                 sys.stderr.write("invalid command\n")
             else:
@@ -120,7 +126,10 @@ class Node(object):
                 recv_data = conn.recv(1024)
                 if not recv_data:  # recv ending msg from client
                     break
-
+                ############### Failure Detection Time ####################
+                if recv_data.split(":")[0] == "-1":  # received failure timing
+                    self.recv_fail_time = float(recv_data.split(":")[1])
+                ############################################################
                 # self.Hashing(recv_data, addr)
                 if (recv_data.split(":")[0] == "store"):
                     self.local_memory[recv_data.split(":")[1]]=recv_data.split(":")[2]
@@ -171,7 +180,8 @@ class Node(object):
         self.rebalancing = True #start rebalance after recover completed
         self.recovering=True
         start_len=len(self.NODE_ID_LIST)
-		w_time = float(self.period)/1000# seconds
+        w_time = float(self.period)/1000# seconds
+
         for i in range(5):
             time.sleep(w_time/5)
             sys.stderr.write("start_len="+str(start_len)+'\n')
@@ -182,6 +192,7 @@ class Node(object):
                 self.recover(self.sec_fail)
                 sys.stderr.write("sec_fail recovered\n")
                 break  # after T+MaxOneWayDelay
+
         sys.stderr.write( "first_fail" + str(first_fail)+'\n')
         self.recover(first_fail)
         self.recovering = False
@@ -191,10 +202,7 @@ class Node(object):
         return -1
 
 
-
-
 # -------------------------------------Hashing_key-value storage-------------------------------------------
-    
     def recover(self,node_fail_id):
 
         local_mem=copy.deepcopy(self.local_memory)
@@ -401,7 +409,7 @@ class Node(object):
         idx_suc = (store_idx + 1) % len(sorted_node_id)
         self.client(self.NODE_ID_LIST[sorted_node_id[idx_suc]], self.port, "search:" + key_input)
 
-        time.sleep(T/5/1000) #timeout=T/5
+        time.sleep(1.0) #timeout=T/5
         if len(self.return_value)>0:
             value_return=" ".join(self.return_value[sorted(self.return_value.keys())[-1]].split("*")[1:])
             print "Found"+": "+value_return #returnvalue
@@ -441,13 +449,20 @@ class Node(object):
         sys.stderr.write("possible owers:\n")
         sys.stderr.write(" ".join(owner_cal)+'\n')
 
+        ################# Latency per Lookup #####################
+        tw_start = time.time()
+        ##########################################################
+
         self.client(self.NODE_ID_LIST[store_id], self.port, "search:" + key_input)
         self.client(self.NODE_ID_LIST[sorted_node_id[idx_pre]], self.port, "search:" + key_input)
         self.client(self.NODE_ID_LIST[sorted_node_id[idx_suc]], self.port, "search:" + key_input)
 
-        for i in range(5):
-            time.sleep(1.0/5)  # timeout= 1 second
+        for i in range(20):
+            time.sleep(2.0/20)  # timeout= 1 second
             if len(self.return_value) >= 3:
+                ################ Latency per Lookup ######################
+                print str((time.time() - tw_start)*1000)+"," #ms
+                ##########################################################
                 sys.stderr.write(str(len(self.return_value))+'\n')
                 break
 
@@ -457,7 +472,7 @@ class Node(object):
             sys.stderr.write(str(len(self.return_value)) + '\n')
             for key, value in self.return_value.iteritems():
                 self.owner.append(value.split("*")[0])
-            print " ".join(self.owner)
+            #print " ".join(self.owner)
 
 
 
@@ -490,12 +505,22 @@ class Node(object):
 
     def heartbeating(self): # Heartbeat main method
         prev_time = time.time()*1000
+        #slp_time = (float(self.period)/1000)/20
         while True:
-            time.sleep((self.period/1000)/10) # delay for checking
+            #time.sleep(slp_time) # delay for checking
             cur_time = time.time()*1000
             if(cur_time-prev_time>self.period): #send heartbeating every period
+                #cur_bw = float(len(self.NODE_ID_LIST)-1) * 1000 / (cur_time - prev_time)
                 prev_time = cur_time
                 self.multicast_0()
+                ############### Heartbeat Bandwidth ###############
+                self.hb_cnt += 1
+                self.bw_sum += (len(self.NODE_ID_LIST) - 1)
+                if self.hb_cnt % 25 == 0:
+                    tw = time.time() - self.tw_start #ms
+                    print "Average Bandwith = ", float(self.bw_sum) / tw, " msg/sec"
+                    self.bw_sum = 0
+                    self.tw_start = time.time()
 
     def detector(self): # Heartbeat Detector: receive, check, multicast failure flag
         ss = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -532,9 +557,13 @@ class Node(object):
             conn.close()  # close client socket
 
     def Timer(self, host):
+        #slp_time = (float(self.period)/1000) / 3
         while True:
-            time.sleep((self.period / 1000) / 3)
+            #time.sleep(slp_time)
             if (time.time() * 1000 > self.timestamp[host] + 2 * self.period):  # T+MaxOneWayDelay
+                ###################### Failure Detection Time #########################
+                sys.stderr.write("failure detection time = " + str(1000 * (time.time() - self.recv_fail_time)) + " ms\n")
+                #######################################################################
                 # broadcast
                 self.basic_multicast(host + ":" + "failed")
                 return -1
@@ -562,13 +591,13 @@ if __name__ == "__main__":
 
     ############################ main code #######################################
     M = 5  # hashing bits
-    T = 3000 # ms, period
+    T = 3000.0 # ms, period
     user_port = 9999 # port for message input
     fail_detect_port = 8888 # port for heart beat
     host = socket.gethostbyname(socket.gethostname())  # get host machine IP address
     # create process node object containing both ISIS and Failure Detection
 
-    node = Node(host, user_port, fail_detect_port, T, 10)
+    node = Node(host, user_port, fail_detect_port, T)
 
 
     ###### ISIS Total Ordering Thread ###########################################

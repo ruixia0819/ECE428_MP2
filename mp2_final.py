@@ -2,7 +2,7 @@
 ECE428: Distributed System
 Machine Problem 2
 Author: Rui Xia, Youjie Li
-Date: Feb. 25. 2017
+Date: April.10.2017
 '''
 
 import socket
@@ -13,7 +13,7 @@ import sys
 import copy
 
 class Node(object):
-    def __init__(self, host, port, port_failure, period, num_node_alive):
+    def __init__(self, host, port, port_failure, period):
         ########## network parameters ####################################
         self.host = host
         self.port = port
@@ -171,7 +171,8 @@ class Node(object):
         self.rebalancing = True #start rebalance after recover completed
         self.recovering=True
         start_len=len(self.NODE_ID_LIST)
-		w_time = float(self.period)/1000# seconds
+        w_time = float(self.period)/1000# seconds
+
         for i in range(5):
             time.sleep(w_time/5)
             sys.stderr.write("start_len="+str(start_len)+'\n')
@@ -182,6 +183,7 @@ class Node(object):
                 self.recover(self.sec_fail)
                 sys.stderr.write("sec_fail recovered\n")
                 break  # after T+MaxOneWayDelay
+
         sys.stderr.write( "first_fail" + str(first_fail)+'\n')
         self.recover(first_fail)
         self.recovering = False
@@ -213,7 +215,6 @@ class Node(object):
 
         if suc_idx == len(sorted_node_id)-1:
             suc_idx = -1
-
 
         if self.my_node_id==suc_id:
 
@@ -273,7 +274,6 @@ class Node(object):
         suc_suc_idx= suc_idx+1
         suc_suc_id=sorted_node_id[suc_suc_idx]
 
-
         if self.my_node_id==suc_id:
             for key in local_mem:
                 key_id = ord(key[0]) % (2 ** M)
@@ -294,7 +294,6 @@ class Node(object):
                 else:
                     if(key_id > pre_pre_id and key_id < 2 ** M) or (key_id >= 0 and key_id <= pre_id):
                         del self.local_memory[key]
-
 
         if self.my_node_id==pre_id:
             for key in local_mem:
@@ -342,7 +341,6 @@ class Node(object):
 
                     self.com_set(cmd[1],value_set)
                     print "SET OK"
-
 
             elif cmd[0] == "GET":  # get command
                 if len_cmd !=2:
@@ -401,7 +399,7 @@ class Node(object):
         idx_suc = (store_idx + 1) % len(sorted_node_id)
         self.client(self.NODE_ID_LIST[sorted_node_id[idx_suc]], self.port, "search:" + key_input)
 
-        time.sleep(T/5/1000) #timeout=T/5
+        time.sleep(1.0) #timeout=1 seconds
         if len(self.return_value)>0:
             value_return=" ".join(self.return_value[sorted(self.return_value.keys())[-1]].split("*")[1:])
             print "Found"+": "+value_return #returnvalue
@@ -446,7 +444,7 @@ class Node(object):
         self.client(self.NODE_ID_LIST[sorted_node_id[idx_suc]], self.port, "search:" + key_input)
 
         for i in range(5):
-            time.sleep(1.0/5)  # timeout= 1 second
+            time.sleep(2.0/5)  # timeout= 1 second
             if len(self.return_value) >= 3:
                 sys.stderr.write(str(len(self.return_value))+'\n')
                 break
@@ -490,8 +488,9 @@ class Node(object):
 
     def heartbeating(self): # Heartbeat main method
         prev_time = time.time()*1000
+        #slp_time = (float(self.period)/1000)/20
         while True:
-            time.sleep((self.period/1000)/10) # delay for checking
+            #time.sleep(slp_time) # delay for checking
             cur_time = time.time()*1000
             if(cur_time-prev_time>self.period): #send heartbeating every period
                 prev_time = cur_time
@@ -532,8 +531,9 @@ class Node(object):
             conn.close()  # close client socket
 
     def Timer(self, host):
+        slp_time = (float(self.period)/1000) / 3
         while True:
-            time.sleep((self.period / 1000) / 3)
+            time.sleep(slp_time)
             if (time.time() * 1000 > self.timestamp[host] + 2 * self.period):  # T+MaxOneWayDelay
                 # broadcast
                 self.basic_multicast(host + ":" + "failed")
@@ -542,33 +542,15 @@ class Node(object):
 #-----------------------------------Main Method-----------------------------------------------
 if __name__ == "__main__":
     print "Started ..."
-    ######### global dictionary for all machine ###############################
-
-    # CONNECTION_LIST = {'sp17-cs425-g07-01.cs.illinois.edu': "VM01",
-    #                    'sp17-cs425-g07-02.cs.illinois.edu': "VM02",
-    #                    'sp17-cs425-g07-03.cs.illinois.edu': "VM03",
-    #                    'sp17-cs425-g07-04.cs.illinois.edu': "VM04",
-    #                    'sp17-cs425-g07-05.cs.illinois.edu': "VM05",
-    #                    'sp17-cs425-g07-06.cs.illinois.edu': "VM06",
-    #                    'sp17-cs425-g07-07.cs.illinois.edu': "VM07",
-    #                    'sp17-cs425-g07-08.cs.illinois.edu': "VM08",
-    #                    'sp17-cs425-g07-09.cs.illinois.edu': "VM09",
-    #                    'sp17-cs425-g07-10.cs.illinois.edu': "VM10",
-    #
-    #                    }
-
-
-    # print(self.NODE_ID_LIST)
-
     ############################ main code #######################################
     M = 5  # hashing bits
-    T = 3000 # ms, period
+    T = 3000.0 # ms, period
     user_port = 9999 # port for message input
     fail_detect_port = 8888 # port for heart beat
     host = socket.gethostbyname(socket.gethostname())  # get host machine IP address
     # create process node object containing both ISIS and Failure Detection
 
-    node = Node(host, user_port, fail_detect_port, T, 10)
+    node = Node(host, user_port, fail_detect_port, T)
 
 
     ###### ISIS Total Ordering Thread ###########################################

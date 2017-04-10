@@ -1,0 +1,116 @@
+:::::::
+GET sasdfaf
+$#$&^^*&^*(&(( 098098080
+asdfhdsalkhfdsfakdskjfkdsajf
+
+OWNERS course_name
+SET new_key some new value
+OWNERS new_key
+
+SET a xxxxxx
+SET b xxxxxx
+SET c xxxxxx
+SET dxxx xxxxxx
+SET exxx xxxxxx
+SET fxxx xxxxxx
+SET gxxx xxxxxx
+SET hxxx xxxxxx
+SET ixxx xxxxxx
+SET jxxx xxxxxx
+SET kxxx xxxxxx
+SET lxxx xxxxxx
+SET mxxx xxxxxx
+SET nxxx xxxxxx
+SET oxxx xxxxxx
+SET pxxx xxxxxx
+SET qxxx xxxxxx
+SET rxxx xxxxxx
+SET sxxx xxxxxx
+SET txxx xxxxxx
+SET vxxx xxxxxx
+SET wxxx xxxxxx
+SET xxxx xxxxxx
+SET yxxx xxxxxx
+SET zxxx xxxxxx
+
+GET dxxx
+GET exxx
+GET fxxx
+GET gxxx
+GET hxxx
+GET ixxx
+GET jxxx
+GET kxxx
+GET lxxx
+GET mxxx
+GET nxxx
+GET oxxx
+GET pxxx
+GET qxxx
+GET rxxx
+GET sxxx
+GET txxx
+GET vxxx
+GET wxxx
+GET xxxx
+GET yxxx
+GET zxxx 
+
+OWNERS vvv
+OWNERS vxxx
+
+LIST_LOCAL
+
+\n\n
+
+SET Azzzz zzzz
+GET Azzzz 
+SET Bzzzz zzzz
+GET Bzzzz
+SET Czzzz zzzz
+GET Czzzz
+SET Dzzzz zzzz
+GET Dzzzz
+SET Ezzzz zzzz
+GET Ezzzz
+SET Fzzzz zzzz
+GET Fzzzz
+SET Gzzzz zzzz
+GET Gzzzz
+SET Hzzzz zzzz
+GET Hzzzz
+SET Izzzz zzzz
+GET Izzzz
+SET Jzzzz zzzz
+GET Jzzzz
+SET Kzzzz zzzz
+GET Kzzzz
+SET Lzzzz zzzz
+GET Lzzzz
+SET Mzzzz zzzz
+GET Mzzzz
+SET Nzzzz zzzz
+GET Nzzzz
+SET Ozzzz zzzz
+GET Ozzzz
+SET Pzzzz zzzz
+GET Pzzzz
+SET Rzzzz zzzz
+GET Rzzzz
+SET Szzzz zzzz
+GET Szzzz
+SET Tzzzz zzzz
+GET Tzzzz
+SET Uzzzz zzzz
+GET Uzzzz
+SET Vzzzz zzzz
+GET Vzzzz
+SET Wzzzz zzzz
+GET Wzzzz
+SET Xzzzz zzzz
+GET Xzzzz
+SET Yzzzz zzzz
+GET Yzzzz
+SET Zzzzz zzzz
+GET Zzzzz
+''''''''

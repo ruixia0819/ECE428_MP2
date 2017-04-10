@@ -2,7 +2,7 @@
 ECE428: Distributed System
 Machine Problem 2
 Author: Rui Xia, Youjie Li
-Date: Feb. 25. 2017
+Date: April.8. 2017
 '''
 
 import socket
@@ -25,7 +25,7 @@ class Node(object):
         ######## Hashing paramters ########################
         self.local_memory={}
         self.owner=[]
-        self.NODE_ID_LIST = {}  #node_id: domain_name
+        self.NODE_ID_LIST = {}  #node_id: ip addr
         self.return_value = {}
         self.sec_fail=-1
         self.recovering = False
@@ -46,10 +46,6 @@ class Node(object):
         while True:
 
             cmd = raw_input("")
-            # if cmd== "send self":
-            #     self.client(self.NODE_ID_LIST[self.my_node_id], self.port, "search:" + "x" )
-            #     time.sleep(10)
-            #     print self.return_value
 
             if len(cmd.split())<1:
                 sys.stderr.write("invalid command\n")
@@ -75,10 +71,10 @@ class Node(object):
                         file2.close()
 
                         try:
-                            sys.stderr.write("print file2\n")
+                            sys.stderr.write(" print file2\n")
                             with open(cmd.split()[2], "r") as f:
                                 for line in f:
-                                    sys.stderr.write(line)
+                                    sys.stderr.write(line + '\n')
                         except:
                             sys.stderr.write("create file2 failed")
                 else:
@@ -144,6 +140,7 @@ class Node(object):
 
                 elif (recv_data.split(":")[-1] == "failed"):  # received failed message
 
+                    #recover
                     key_failed=""
                     for key, value in self.NODE_ID_LIST.iteritems():
                         if value==recv_data.split(":")[0]:
@@ -171,9 +168,8 @@ class Node(object):
         self.rebalancing = True #start rebalance after recover completed
         self.recovering=True
         start_len=len(self.NODE_ID_LIST)
-		w_time = float(self.period)/1000# seconds
-        for i in range(5):
-            time.sleep(w_time/5)
+        for i in range(10):
+            time.sleep(self.period/1000) #T(s)
             sys.stderr.write("start_len="+str(start_len)+'\n')
             sys.stderr.write("curr_len="+str(len(self.NODE_ID_LIST))+'\n')
 
@@ -182,6 +178,7 @@ class Node(object):
                 self.recover(self.sec_fail)
                 sys.stderr.write("sec_fail recovered\n")
                 break  # after T+MaxOneWayDelay
+            
         sys.stderr.write( "first_fail" + str(first_fail)+'\n')
         self.recover(first_fail)
         self.recovering = False
@@ -193,12 +190,10 @@ class Node(object):
 
 
 
-# -------------------------------------Hashing_key-value storage-------------------------------------------
-    
+# --------------------------------------key-value storage---------------------------------------------
+
     def recover(self,node_fail_id):
-
         local_mem=copy.deepcopy(self.local_memory)
-
         sorted_node_id = sorted(self.NODE_ID_LIST.keys())
         suc_id = sorted_node_id[0]
         suc_idx = 0
@@ -215,8 +210,7 @@ class Node(object):
             suc_idx = -1
 
 
-        if self.my_node_id==suc_id:
-
+        if self.my_node_id==suc_id: 
             for key in local_mem:
                 key_id=ord(key[0]) % (2 ** M)
                 if suc_id>node_fail_id:
@@ -446,7 +440,7 @@ class Node(object):
         self.client(self.NODE_ID_LIST[sorted_node_id[idx_suc]], self.port, "search:" + key_input)
 
         for i in range(5):
-            time.sleep(1.0/5)  # timeout= 1 second
+            time.sleep(float(self.period)/1000/25)  # timeout=T/5
             if len(self.return_value) >= 3:
                 sys.stderr.write(str(len(self.return_value))+'\n')
                 break
@@ -509,17 +503,17 @@ class Node(object):
                 if not hbaddr:  # recv ending msg from client
                     break
 
-                if(hbaddr not in self.NODE_ID_LIST.values()):
-                    # rebalance
+                if(hbaddr not in self.NODE_ID_LIST.values()): #Find first Heart Beating
                     if not self.rebalancing:
+                        #Add to alive node list
                         new_id = int(socket.gethostbyname(hbaddr).split(".")[-1]) % (2 ** M)
                         self.NODE_ID_LIST[new_id] = hbaddr
-
+                        #start timer and wait for next hb for Failure Detection
                         if hbaddr not in self.timer_thread:
                             self.timestamp[hbaddr] = time.time() * 1000
                             self.timer_thread[hbaddr] = threading.Thread(target=self.Timer, args=(hbaddr,), kwargs={})
                             self.timer_thread[hbaddr].start()
-
+                        #start rebalance
                         if len(self.local_memory)!=0:
                             t_reb = threading.Thread(target=self.rebalance, args=(new_id,))
                             t_reb.start()
@@ -542,27 +536,10 @@ class Node(object):
 #-----------------------------------Main Method-----------------------------------------------
 if __name__ == "__main__":
     print "Started ..."
-    ######### global dictionary for all machine ###############################
-
-    # CONNECTION_LIST = {'sp17-cs425-g07-01.cs.illinois.edu': "VM01",
-    #                    'sp17-cs425-g07-02.cs.illinois.edu': "VM02",
-    #                    'sp17-cs425-g07-03.cs.illinois.edu': "VM03",
-    #                    'sp17-cs425-g07-04.cs.illinois.edu': "VM04",
-    #                    'sp17-cs425-g07-05.cs.illinois.edu': "VM05",
-    #                    'sp17-cs425-g07-06.cs.illinois.edu': "VM06",
-    #                    'sp17-cs425-g07-07.cs.illinois.edu': "VM07",
-    #                    'sp17-cs425-g07-08.cs.illinois.edu': "VM08",
-    #                    'sp17-cs425-g07-09.cs.illinois.edu': "VM09",
-    #                    'sp17-cs425-g07-10.cs.illinois.edu': "VM10",
-    #
-    #                    }
-
-
-    # print(self.NODE_ID_LIST)
 
     ############################ main code #######################################
     M = 5  # hashing bits
-    T = 3000 # ms, period
+    T = 2500 # ms, period
     user_port = 9999 # port for message input
     fail_detect_port = 8888 # port for heart beat
     host = socket.gethostbyname(socket.gethostname())  # get host machine IP address
